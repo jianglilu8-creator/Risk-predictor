@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NMIBC BCG Recurrence Risk Calculator</title>
+<style>
+  body { font-family: Arial, Helvetica, sans-serif; max-width: 620px; margin: 30px auto; padding: 0 15px; color: #222; }
+  h1 { font-size: 20px; color: #1d4a9d; }
+  .box { border: 1px solid #ccc; border-radius: 8px; padding: 18px; margin-top: 15px; }
+  label { display: block; margin: 12px 0 4px; font-weight: bold; font-size: 14px; }
+  select, input[type=number] { width: 100%; padding: 7px; font-size: 14px; box-sizing: border-box; }
+  button { margin-top: 16px; width: 100%; padding: 10px; font-size: 15px; background: #1d4a9d; color: #fff; border: none; border-radius: 5px; cursor: pointer; }
+  button:hover { background: #16397a; }
+  .result { margin-top: 18px; display: none; }
+  .result table { width: 100%; border-collapse: collapse; }
+  .result td { padding: 8px 6px; border-bottom: 1px solid #eee; font-size: 14px; }
+  .result td:last-child { text-align: right; font-weight: bold; }
+  .note { font-size: 12px; color: #666; margin-top: 14px; }
+  .err { color: #a94442; font-size: 13px; margin-top: 10px; display: none; }
+</style>
+</head>
+<body>
+
+<h1>Recurrence Risk Calculator for NMIBC Patients after Intravesical BCG Therapy</h1>
+<p style="font-size:13px;color:#555;">This tool estimates 1- and 3-year recurrence-free survival (RFS) probabilities based on the nomogram developed by Lu et al. It is intended for research purposes and requires external validation before clinical use.</p>
+
+<div class="box">
+  <label for="rh">History of recurrence</label>
+  <select id="rh">
+    <option value="no" selected>No</option>
+    <option value="yes">Yes</option>
+  </select>
+
+  <label for="cd4">Total CD4+ cell density (cells/mm&#178;)</label>
+  <input type="number" id="cd4" min="0" step="any" placeholder="e.g. 560" />
+
+  <label for="cd68">Stromal CD68+ cell density (cells/mm&#178;)</label>
+  <input type="number" id="cd68" min="0" step="any" placeholder="e.g. 120" />
+
+  <label for="scale">Input scale for the two densities</label>
+  <select id="scale">
+    <option value="raw" selected>Raw density (cells/mm&#178;) — the tool applies log&#8322; automatically</option>
+    <option value="log2">Already log&#8322;-transformed values</option>
+  </select>
+
+  <button onclick="calc()">Calculate</button>
+  <div class="err" id="err">Please enter positive values for both cell densities.</div>
+</div>
+
+<div class="box result" id="result">
+  <table>
+    <tr><td>Riskscore</td><td id="r_risk"></td></tr>
+    <tr><td>1-year recurrence-free survival</td><td id="r_1y"></td></tr>
+    <tr><td>3-year recurrence-free survival</td><td id="r_3y"></td></tr>
+  </table>
+  <p class="note">Probabilities were derived from the Cox model: S(t) = S0(t)^exp(lp), where lp = 0.949 &times; (Recurrence history) + 0.910 &times; (Riskscore), and the Riskscore = exp(0.271 &times; log2(CD4) + 0.273 &times; log2(CD68s)) . <b>CD4</b> denotes the total CD4+ cell density in the whole tissue, and <b>CD68s</b> denotes the CD68+ cell density in the stromal compartment (cells/mm&#178;).</p>
+</div>
+
+<script>
+  // Model constants (derived from the training cohort, n = 80)
+  var MU_CD4   = 9.138806;    // cohort mean of log2(CD4 density)
+  var MU_CD68S = 6.913605;    // cohort mean of log2(CD68s density)
+  var B_CD4    = 0.2714095;   // risk-score model coefficient (CD4)
+  var B_CD68S  = 0.2730251;   // risk-score model coefficient (CD68s)
+  var MU_RISK  = 1.156198;    // cohort mean of risk score
+  var MU_RH    = 0.5125;      // cohort proportion of recurrence history = yes
+  var B_RH     = 0.9487774;   // nomogram coefficient (recurrence history)
+  var B_RISK   = 0.9099200;   // nomogram coefficient (risk score)
+  // Baseline survival at linear predictor = 0
+  var S0 = { 1: 0.5959568, 2: 0.3982325, 3: 0.3229255 };
+
+  function calc() {
+    var err = document.getElementById('err');
+    var cd4 = parseFloat(document.getElementById('cd4').value);
+    var cd68 = parseFloat(document.getElementById('cd68').value);
+    err.style.display = 'none';
+    if (!(cd4 > 0) || !(cd68 > 0)) {
+      err.style.display = 'block';
+      return;
+    }
+
+    var log2 = function (x) { return Math.log(x) / Math.LN2; };
+    var scale = document.getElementById('scale').value;
+    var l2_cd4  = (scale === 'raw') ? log2(cd4)  : cd4;
+    var l2_cd68 = (scale === 'raw') ? log2(cd68) : cd68;
+    var risk = Math.exp(B_CD4 * (l2_cd4 - MU_CD4) + B_CD68S * (l2_cd68 - MU_CD68S));
+
+    var rhYes = document.getElementById('rh').value === 'yes' ? 1 : 0;
+    var lp = B_RH * (rhYes - MU_RH) + B_RISK * (risk - MU_RISK);
+    var expLP = Math.exp(lp);
+
+    var s1 = Math.pow(S0[1], expLP);
+    var s3 = Math.pow(S0[3], expLP);
+
+    document.getElementById('r_risk').textContent = risk.toFixed(3);
+    document.getElementById('r_1y').textContent = (s1 * 100).toFixed(1) + '%';
+    document.getElementById('r_3y').textContent = (s3 * 100).toFixed(1) + '%';
+    document.getElementById('result').style.display = 'block';
+  }
+</script>
+
+</body>
+</html>
